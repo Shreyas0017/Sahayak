@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PenTool, Image, Download, Sparkles, Eye } from 'lucide-react';
+import { PenTool, Image, Download, Sparkles, Eye, AlertCircle, Key } from 'lucide-react';
 
 const VisualAids: React.FC = () => {
   const [description, setDescription] = useState('');
@@ -7,6 +7,8 @@ const VisualAids: React.FC = () => {
   const [complexity, setComplexity] = useState('simple');
   const [generatedAid, setGeneratedAid] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState('');
+  const apiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY;
 
   const diagramTypes = [
     { value: 'flowchart', label: 'Flowchart', description: 'Process flows and decision trees' },
@@ -36,69 +38,107 @@ const VisualAids: React.FC = () => {
     "Photosynthesis process in plants",
   ];
 
+  const buildPrompt = () => {
+    const selectedType = diagramTypes.find(type => type.value === diagramType);
+    const selectedComplexity = complexityLevels.find(level => level.value === complexity);
+
+    return `Create an SVG diagram for: "${description}"
+
+Requirements:
+- Diagram type: ${selectedType?.label} (${selectedType?.description})
+- Complexity level: ${selectedComplexity?.label} (${selectedComplexity?.description})
+- Create a complete, valid SVG with proper structure
+- Use educational colors and clear, readable fonts
+- Include appropriate labels and annotations
+- Make it suitable for blackboard teaching (simple, clear lines)
+- Optimize for 400x300 viewBox dimensions
+- Use semantic elements and proper grouping
+- Include arrows, connectors, and visual flow indicators where appropriate
+
+IMPORTANT: 
+- Return ONLY the complete SVG code starting with <svg> and ending with </svg>
+- Do not include any explanatory text before or after the SVG
+- Use clean, educational styling suitable for classroom use
+- Ensure all text is legible and properly positioned
+- Use appropriate colors that work well for educational materials
+
+Generate the complete SVG diagram now:`;
+  };
+
   const handleGenerate = async () => {
-    if (!description.trim()) return;
+    if (!description.trim()) {
+      setError('Please enter a description');
+      return;
+    }
+
+    if (!apiKey) {
+      setError('Gemini API key not found in environment variables');
+      return;
+    }
     
     setIsGenerating(true);
-    // Simulate API call to generate visual aid
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    setError('');
     
-    // For demo purposes, we'll show a placeholder SVG
-    const mockSVG = `
-      <svg width="400" height="300" viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg">
-        <!-- Water Cycle Diagram -->
-        <defs>
-          <linearGradient id="skyGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" style="stop-color:#87CEEB;stop-opacity:1" />
-            <stop offset="100%" style="stop-color:#E0F6FF;stop-opacity:1" />
-          </linearGradient>
-        </defs>
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: buildPrompt()
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.3,
+            topK: 20,
+            topP: 0.8,
+            maxOutputTokens: 4096,
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to generate visual aid');
+      }
+
+      const data = await response.json();
+      
+      if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+        let content = data.candidates[0].content.parts[0].text;
         
-        <!-- Sky Background -->
-        <rect width="400" height="200" fill="url(#skyGradient)"/>
+        // Clean up the response to extract only the SVG
+        const svgMatch = content.match(/<svg[\s\S]*?<\/svg>/i);
+        if (svgMatch) {
+          content = svgMatch[0];
+        } else {
+          // If no SVG found, try to extract from code blocks
+          const codeBlockMatch = content.match(/```[\s\S]*?<svg[\s\S]*?<\/svg>[\s\S]*?```/i);
+          if (codeBlockMatch) {
+            const svgInCode = codeBlockMatch[0].match(/<svg[\s\S]*?<\/svg>/i);
+            if (svgInCode) {
+              content = svgInCode[0];
+            }
+          }
+        }
         
-        <!-- Sun -->
-        <circle cx="350" cy="50" r="25" fill="#FFD700" stroke="#FFA500" stroke-width="2"/>
+        // Validate that we have a proper SVG
+        if (!content.includes('<svg')) {
+          throw new Error('Generated content is not a valid SVG');
+        }
         
-        <!-- Clouds -->
-        <ellipse cx="100" cy="60" rx="30" ry="20" fill="#FFF" opacity="0.8"/>
-        <ellipse cx="120" cy="50" rx="35" ry="25" fill="#FFF" opacity="0.8"/>
-        <ellipse cx="140" cy="60" rx="30" ry="20" fill="#FFF" opacity="0.8"/>
-        
-        <!-- Mountains -->
-        <polygon points="0,200 80,120 160,200" fill="#8B7355"/>
-        <polygon points="120,200 200,100 280,200" fill="#A0522D"/>
-        
-        <!-- Water Body -->
-        <ellipse cx="320" cy="250" rx="70" ry="30" fill="#4682B4"/>
-        
-        <!-- Evaporation Arrows -->
-        <path d="M 320 220 Q 325 190 330 160" stroke="#FF6B6B" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-        <path d="M 340 225 Q 345 195 350 165" stroke="#FF6B6B" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-        
-        <!-- Condensation Arrows -->
-        <path d="M 150 80 Q 155 110 160 140" stroke="#4ECDC4" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
-        
-        <!-- Precipitation -->
-        <path d="M 130 80 L 125 100 M 140 75 L 135 95 M 150 80 L 145 100" stroke="#4682B4" stroke-width="2"/>
-        
-        <!-- Labels -->
-        <text x="350" y="190" text-anchor="middle" font-family="Arial" font-size="12" fill="#333">Evaporation</text>
-        <text x="120" y="40" text-anchor="middle" font-family="Arial" font-size="12" fill="#333">Condensation</text>
-        <text x="100" y="110" text-anchor="middle" font-family="Arial" font-size="12" fill="#333">Precipitation</text>
-        <text x="320" y="290" text-anchor="middle" font-family="Arial" font-size="12" fill="#333">Collection</text>
-        
-        <!-- Arrow marker -->
-        <defs>
-          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
-            <polygon points="0 0, 10 3.5, 0 7" fill="#333" />
-          </marker>
-        </defs>
-      </svg>
-    `;
-    
-    setGeneratedAid(mockSVG);
-    setIsGenerating(false);
+        setGeneratedAid(content);
+      } else {
+        throw new Error('No content generated');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred while generating the visual aid');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleDownload = () => {
@@ -107,9 +147,42 @@ const VisualAids: React.FC = () => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'visual-aid.svg';
+      a.download = `visual-aid-${diagramType}-${Date.now()}.svg`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    }
+  };
+
+  const handleDownloadPNG = () => {
+    if (generatedAid) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        canvas.width = 800;
+        canvas.height = 600;
+        ctx?.drawImage(img, 0, 0, 800, 600);
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `visual-aid-${diagramType}-${Date.now()}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }
+        }, 'image/png');
+      };
+      
+      const svgBlob = new Blob([generatedAid], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(svgBlob);
+      img.src = url;
     }
   };
 
@@ -128,6 +201,8 @@ const VisualAids: React.FC = () => {
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Diagram Settings</h2>
+            
+            
             
             {/* Diagram Type */}
             <div className="mb-6">
@@ -178,9 +253,17 @@ const VisualAids: React.FC = () => {
               />
             </div>
 
+            {/* Error Display */}
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center">
+                <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
+                <span className="text-sm text-red-700">{error}</span>
+              </div>
+            )}
+
             <button
               onClick={handleGenerate}
-              disabled={!description.trim() || isGenerating}
+              disabled={!description.trim() || !apiKey || isGenerating}
               className="w-full bg-orange-500 text-white py-2 px-4 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
               {isGenerating ? (
@@ -223,6 +306,13 @@ const VisualAids: React.FC = () => {
                     <Download className="h-4 w-4 mr-1" />
                     Download SVG
                   </button>
+                  <button
+                    onClick={handleDownloadPNG}
+                    className="flex items-center px-3 py-1 text-sm bg-green-100 text-green-700 rounded-md hover:bg-green-200 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  >
+                    <Download className="h-4 w-4 mr-1" />
+                    Download PNG
+                  </button>
                 </div>
               )}
             </div>
@@ -255,6 +345,8 @@ const VisualAids: React.FC = () => {
           <li>• Mention key elements you want included (labels, arrows, colors)</li>
           <li>• Keep it simple for easy blackboard reproduction</li>
           <li>• Generated diagrams are in SVG format for easy scaling and editing</li>
+          <li>• Use the sample descriptions as templates for your own requests</li>
+          <li>• Complex diagrams work better with "detailed" complexity setting</li>
         </ul>
       </div>
     </div>

@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Gamepad2, Play, RefreshCw, Trophy, Star } from 'lucide-react';
+import { Gamepad2, Play, RefreshCw, Trophy, Star, AlertCircle } from 'lucide-react';
 
 const EducationalGames: React.FC = () => {
   const [gameType, setGameType] = useState('quiz');
   const [subject, setSubject] = useState('');
   const [topic, setTopic] = useState('');
   const [gradeLevel, setGradeLevel] = useState('3-5');
+  const [error, setError] = useState('');
+
   type GameQuestion = {
     question: string;
     options: string[];
@@ -50,55 +52,124 @@ const EducationalGames: React.FC = () => {
     'Environmental Studies', 'General Knowledge'
   ];
 
+  const generateGameWithGemini = async () => {
+    const API_KEY = import.meta.env.VITE_GOOGLE_AI_API_KEY;
+    
+    if (!API_KEY) {
+      throw new Error('Google AI API key not found. Please check your environment variables.');
+    }
+
+    const gradeDescription = {
+      '1-2': 'very simple language suitable for grades 1-2 (ages 6-8)',
+      '3-5': 'age-appropriate language for grades 3-5 (ages 8-11)',
+      '6-8': 'more advanced language for grades 6-8 (ages 11-14)'
+    };
+
+    const prompt = `Create an educational ${gameType} game about ${topic} in ${subject} for ${gradeDescription[gradeLevel as keyof typeof gradeDescription]}. 
+
+Generate exactly 5 multiple choice questions with:
+- Clear, engaging questions appropriate for the grade level
+- 4 answer options each (A, B, C, D)
+- One correct answer
+- Educational explanations for each correct answer
+
+Please respond in this exact JSON format:
+{
+  "title": "Game title",
+  "description": "Brief description",
+  "questions": [
+    {
+      "question": "Question text",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correct": 0,
+      "explanation": "Educational explanation"
+    }
+  ]
+}
+
+Make sure the content is educational, engaging, and appropriate for the specified grade level.`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 2048,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(`API Error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+    }
+
+    const data = await response.json();
+    
+    if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+      throw new Error('Invalid response format from Gemini API');
+    }
+
+    const content = data.candidates[0].content.parts[0].text;
+    
+    // Clean up the response to extract JSON
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No valid JSON found in response');
+    }
+
+    const gameData = JSON.parse(jsonMatch[0]);
+    
+    // Validate the structure
+    if (!gameData.questions || !Array.isArray(gameData.questions)) {
+      throw new Error('Invalid game data structure');
+    }
+
+    return {
+      type: gameType,
+      title: gameData.title || `${subject}: ${topic}`,
+      description: gameData.description || `Interactive ${gameType} game about ${topic}`,
+      questions: gameData.questions.map((q: any) => ({
+        question: q.question || '',
+        options: Array.isArray(q.options) ? q.options : [],
+        correct: typeof q.correct === 'number' ? q.correct : 0,
+        explanation: q.explanation || ''
+      }))
+    };
+  };
+
   const handleGenerateGame = async () => {
     if (!subject || !topic) return;
     
     setIsGenerating(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    setError('');
     
-    // Mock game data
-    const mockGame = {
-      type: gameType,
-      title: `${subject}: ${topic}`,
-      description: `Interactive ${gameType} game about ${topic}`,
-      questions: [
-        {
-          question: "What is the process by which plants make their own food?",
-          options: ["Photosynthesis", "Respiration", "Digestion", "Circulation"],
-          correct: 0,
-          explanation: "Photosynthesis is the process where plants use sunlight, water, and carbon dioxide to make glucose and oxygen."
-        },
-        {
-          question: "Which part of the plant absorbs water from the soil?",
-          options: ["Leaves", "Stem", "Roots", "Flowers"],
-          correct: 2,
-          explanation: "Roots absorb water and nutrients from the soil to help the plant grow."
-        },
-        {
-          question: "What do plants need to carry out photosynthesis?",
-          options: ["Only water", "Only sunlight", "Sunlight, water, and carbon dioxide", "Only carbon dioxide"],
-          correct: 2,
-          explanation: "Plants need sunlight, water, and carbon dioxide to make their own food through photosynthesis."
-        },
-        {
-          question: "What gas do plants release during photosynthesis?",
-          options: ["Carbon dioxide", "Oxygen", "Nitrogen", "Hydrogen"],
-          correct: 1,
-          explanation: "Plants release oxygen as a byproduct of photosynthesis, which is essential for animals and humans to breathe."
-        }
-      ]
-    };
-    
-    setGeneratedGame(mockGame);
-    setGameState({
-      currentQuestion: 0,
-      score: 0,
-      showResult: false,
-      selectedAnswer: null,
-      isCorrect: false
-    });
-    setIsGenerating(false);
+    try {
+      const gameData = await generateGameWithGemini();
+      setGeneratedGame(gameData);
+      setGameState({
+        currentQuestion: 0,
+        score: 0,
+        showResult: false,
+        selectedAnswer: null,
+        isCorrect: false
+      });
+    } catch (err) {
+      console.error('Error generating game:', err);
+      setError(err instanceof Error ? err.message : 'Failed to generate game. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleAnswerSelect = (answerIndex: number) => {
@@ -153,6 +224,16 @@ const EducationalGames: React.FC = () => {
         <div className="lg:col-span-1">
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Game Settings</h2>
+            
+            {/* Error Display */}
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                <div className="flex items-center">
+                  <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
+                  <span className="text-sm text-red-700">{error}</span>
+                </div>
+              </div>
+            )}
             
             {/* Game Type */}
             <div className="mb-4">

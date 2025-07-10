@@ -141,15 +141,6 @@ Please provide the content in ${selectedLang?.native} script with proper formatt
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Content Settings</h2>
             
-            {/* API Status */}
-            <div className="mb-6">
-              <div className={`p-3 rounded-md flex items-center ${apiKey ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
-                <Key className={`h-4 w-4 mr-2 ${apiKey ? 'text-green-600' : 'text-red-600'}`} />
-                <span className={`text-sm font-medium ${apiKey ? 'text-green-700' : 'text-red-700'}`}>
-                  {apiKey ? 'Gemini API Connected' : 'Gemini API Key Missing'}
-                </span>
-              </div>
-            </div>
 
             {/* Language Selection */}
             <div className="mb-6">
