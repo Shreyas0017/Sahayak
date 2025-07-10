@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, Globe, Sparkles, Download, Copy } from 'lucide-react';
+import { FileText, Globe, Sparkles, Download, Copy, AlertCircle, Key } from 'lucide-react';
 
 const ContentGenerator: React.FC = () => {
   const [selectedLanguage, setSelectedLanguage] = useState('marathi');
@@ -8,6 +8,8 @@ const ContentGenerator: React.FC = () => {
   const [gradeLevel, setGradeLevel] = useState('3-5');
   const [generatedContent, setGeneratedContent] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState('');
+  const apiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY;
 
   const languages = [
     { code: 'marathi', name: 'Marathi', native: 'मराठी' },
@@ -33,34 +35,94 @@ const ContentGenerator: React.FC = () => {
     { value: 'mixed', label: 'Mixed Grades', description: 'Adaptable for multiple levels' },
   ];
 
+  const buildPrompt = () => {
+    const selectedLang = languages.find(lang => lang.code === selectedLanguage);
+    const selectedType = contentTypes.find(type => type.value === contentType);
+    const selectedGrade = gradeLevels.find(grade => grade.value === gradeLevel);
+
+    return `Create a ${selectedType?.label.toLowerCase()} in ${selectedLang?.native} (${selectedLang?.name}) language about "${topic}".
+
+Requirements:
+- Target audience: ${selectedGrade?.label} (${selectedGrade?.description})
+- Content type: ${selectedType?.description}
+- Language: Use proper ${selectedLang?.native} script and vocabulary
+- Make it culturally relevant and relatable to Indian context
+- Include local examples and references that students can relate to
+- Keep the language appropriate for the specified grade level
+- Make it engaging and educational
+
+Please provide the content in ${selectedLang?.native} script with proper formatting.`;
+  };
+
   const handleGenerate = async () => {
-    if (!topic.trim()) return;
+    if (!topic.trim()) {
+      setError('Please enter a topic');
+      return;
+    }
+
+    if (!apiKey) {
+      setError('Gemini API key not found in environment variables');
+      return;
+    }
     
     setIsGenerating(true);
-    // Simulate API call to Google Gemini
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    setError('');
     
-    // Mock generated content
-    const mockContent = `शेतकरी आणि मातीचे प्रकार
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: buildPrompt()
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            maxOutputTokens: 2048,
+          }
+        })
+      });
 
-एकदा एका छोट्या गावात रामू नावाचा शेतकरी राहत होता. रामूकडे मोठे शेत होते, पण त्याच्या शेतात वेगवेगळ्या प्रकारची माती होती.
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Failed to generate content');
+      }
 
-उत्तरेकडील शेतात काळी माती होती. ही माती कापसासाठी खूप चांगली होती. काळी माती पाणी चांगले धरून ठेवते आणि पिकांना चांगले पोषण देते.
-
-दक्षिणेकडील शेतात लाल माती होती. या मातीत लोह असते म्हणून ती लाल दिसते. या मातीत मूंगफली आणि ज्वार चांगले येते.
-
-पूर्वेकडील शेतात वाळूमाती होती. ही माती पाणी लगेच शोषून घेते पण चांगले निचरा करते. या मातीत भाज्या चांगल्या येतात.
-
-रामूने शिकले की प्रत्येक मातीचे वेगळे गुणधर्म आहेत आणि त्यानुसार योग्य पिके लावली पाहिजेत. यामुळे त्याची शेती यशस्वी झाली.
-
-या कथेतून आपण शिकतो की मातीचे प्रकार ओळखून योग्य पिके लावणे महत्वाचे आहे.`;
-    
-    setGeneratedContent(mockContent);
-    setIsGenerating(false);
+      const data = await response.json();
+      
+      if (data.candidates && data.candidates[0] && data.candidates[0].content) {
+        const content = data.candidates[0].content.parts[0].text;
+        setGeneratedContent(content);
+      } else {
+        throw new Error('No content generated');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred while generating content');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(generatedContent);
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([generatedContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${contentType}_${selectedLanguage}_${Date.now()}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -79,6 +141,16 @@ const ContentGenerator: React.FC = () => {
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Content Settings</h2>
             
+            {/* API Status */}
+            <div className="mb-6">
+              <div className={`p-3 rounded-md flex items-center ${apiKey ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                <Key className={`h-4 w-4 mr-2 ${apiKey ? 'text-green-600' : 'text-red-600'}`} />
+                <span className={`text-sm font-medium ${apiKey ? 'text-green-700' : 'text-red-700'}`}>
+                  {apiKey ? 'Gemini API Connected' : 'Gemini API Key Missing'}
+                </span>
+              </div>
+            </div>
+
             {/* Language Selection */}
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -148,9 +220,17 @@ const ContentGenerator: React.FC = () => {
               />
             </div>
 
+            {/* Error Display */}
+            {error && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md flex items-center">
+                <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
+                <span className="text-sm text-red-700">{error}</span>
+              </div>
+            )}
+
             <button
               onClick={handleGenerate}
-              disabled={!topic.trim() || isGenerating}
+              disabled={!topic.trim() || !apiKey || isGenerating}
               className="w-full bg-orange-500 text-white py-2 px-4 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
             >
               {isGenerating ? (
@@ -177,7 +257,10 @@ const ContentGenerator: React.FC = () => {
                     <Copy className="h-4 w-4 mr-1" />
                     Copy
                   </button>
-                  <button className="flex items-center px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  <button 
+                    onClick={handleDownload}
+                    className="flex items-center px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
                     <Download className="h-4 w-4 mr-1" />
                     Download
                   </button>
