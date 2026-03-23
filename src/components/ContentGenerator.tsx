@@ -1,14 +1,24 @@
 import React, { useState } from 'react';
-import { FileText, Sparkles, Download, Copy, AlertCircle } from 'lucide-react';
+import { FileText, Globe, Sparkles, Download, Copy, AlertCircle } from 'lucide-react';
 
 const ContentGenerator: React.FC = () => {
+  const [selectedLanguage, setSelectedLanguage] = useState('marathi');
   const [contentType, setContentType] = useState('story');
   const [topic, setTopic] = useState('');
   const [generatedContent, setGeneratedContent] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
   const apiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY;
-  const model = import.meta.env.VITE_GOOGLE_AI_MODEL || 'gemini-2.5-pro';
+  const model = import.meta.env.VITE_GOOGLE_AI_MODEL || 'gemini-2.5-flash';
+
+  const languages = [
+    { code: 'marathi', name: 'Marathi', native: 'मराठी' },
+    { code: 'hindi', name: 'Hindi', native: 'हिंदी' },
+    { code: 'gujarati', name: 'Gujarati', native: 'ગુજરાતી' },
+    { code: 'tamil', name: 'Tamil', native: 'தமிழ்' },
+    { code: 'bengali', name: 'Bengali', native: 'বাংলা' },
+    { code: 'english', name: 'English', native: 'English' },
+  ];
 
   const contentTypes = [
     { value: 'story', label: 'Story', description: 'Narrative content with characters and plot' },
@@ -20,18 +30,60 @@ const ContentGenerator: React.FC = () => {
 
   const buildPrompt = () => {
     const selectedType = contentTypes.find(type => type.value === contentType);
+    const selectedLang = languages.find(lang => lang.code === selectedLanguage);
 
-    return `Create a ${selectedType?.label.toLowerCase()} in simple, student-friendly Marathi about "${topic}".
+    return `Create a ${selectedType?.label.toLowerCase()} in simple, student-friendly ${selectedLang?.name} about "${topic}".
 
 Requirements:
 - Content type: ${selectedType?.description}
-- Language: Use proper Marathi script and vocabulary
+- Language: Use proper ${selectedLang?.native} script and age-appropriate vocabulary
 - Make it culturally relevant and relatable to Indian context
 - Include local examples and references that students can relate to
 - Keep the language clear and easy for school students
 - Make it engaging and educational
 
-Please provide the content in Marathi script with proper formatting.`;
+Please provide the content in ${selectedLang?.native} script with proper formatting.`;
+  };
+
+  const generateContentChunk = async (prompt: string) => {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 4096,
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error?.message || 'Failed to generate content');
+    }
+
+    const data = await response.json();
+    const candidate = data?.candidates?.[0];
+    const finishReason = candidate?.finishReason;
+    const content = candidate?.content?.parts
+      ?.map((part: { text?: string }) => part.text || '')
+      .join('')
+      .trim();
+
+    return {
+      content,
+      finishReason,
+      blockReason: data?.promptFeedback?.blockReason as string | undefined,
+    };
   };
 
   const handleGenerate = async () => {
@@ -49,38 +101,42 @@ Please provide the content in Marathi script with proper formatting.`;
     setError('');
     
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: buildPrompt()
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 2048,
-          }
-        })
-      });
+      const firstPrompt = buildPrompt();
+      const firstResult = await generateContentChunk(firstPrompt);
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Failed to generate content');
+      if (!firstResult.content) {
+        if (firstResult.blockReason) {
+          throw new Error(`Request blocked: ${firstResult.blockReason}. Try rephrasing the topic.`);
+        }
+        throw new Error(firstResult.finishReason ? `No content generated (finish reason: ${firstResult.finishReason})` : 'No content generated');
       }
 
-      const data = await response.json();
+      let finalContent = firstResult.content;
+
+      // Auto-continue once if the model stops due to token limit.
+      if (firstResult.finishReason === 'MAX_TOKENS') {
+        const continuationPrompt = `${firstPrompt}
+
+Continue the same response from exactly where it ended.
+Do not repeat previous lines. Return only the remaining content.`;
+
+        const secondResult = await generateContentChunk(continuationPrompt);
+
+        if (secondResult.content) {
+          finalContent = `${finalContent}\n\n${secondResult.content}`;
+        } else if (secondResult.blockReason) {
+          setError(`Continuation blocked: ${secondResult.blockReason}.`);
+        }
+      }
+
+      setGeneratedContent(finalContent);
+
+      if (firstResult.finishReason === 'SAFETY') {
+        setError('Part of the response was limited by safety filters. Try rephrasing the topic.');
+      }
       
-      if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-        const content = data.candidates[0].content.parts[0].text;
-        setGeneratedContent(content);
-      } else {
-        throw new Error('No content generated');
+      if (firstResult.finishReason === 'MAX_TOKENS') {
+        setError('Long response detected. Auto-continuation was attempted to complete the output.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred while generating content');
@@ -98,7 +154,7 @@ Please provide the content in Marathi script with proper formatting.`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${contentType}_${Date.now()}.txt`;
+    a.download = `${contentType}_${selectedLanguage}_${Date.now()}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -134,6 +190,25 @@ Please provide the content in Marathi script with proper formatting.`;
                   </label>
                 ))}
               </div>
+            </div>
+
+            {/* Language Selection */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                <Globe className="h-4 w-4 inline mr-1" />
+                Language
+              </label>
+              <select
+                value={selectedLanguage}
+                onChange={(e) => setSelectedLanguage(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+              >
+                {languages.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.name} ({lang.native})
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Topic Input */}
