@@ -10,6 +10,7 @@ const ContentGenerator: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
   const apiKey = import.meta.env.VITE_GOOGLE_AI_API_KEY;
+  const model = import.meta.env.VITE_GOOGLE_AI_MODEL || 'gemini-2.5-pro';
 
   const languages = [
     { code: 'marathi', name: 'Marathi', native: 'मराठी' },
@@ -69,7 +70,7 @@ Please provide the content in ${selectedLang?.native} script with proper formatt
     setError('');
     
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
